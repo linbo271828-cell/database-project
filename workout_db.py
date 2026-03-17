@@ -3,7 +3,47 @@ from typing import Optional
 
 
 DB_PATH = "workout_tracker.db"
-MUSCLE_GROUPS = ("chest", "back", "legs", "shoulders", "arms", "core", "full_body")
+
+# Detailed muscle groups (legacy broad groups kept for backward compatibility)
+MUSCLE_GROUPS = (
+    # Chest
+    "chest",
+    "upper_chest",
+    "lower_chest",
+    # Back
+    "back",
+    "upper_back",
+    "lats",
+    "traps",
+    "rhomboids",
+    "lower_back",
+    # Legs
+    "legs",
+    "quads",
+    "hamstrings",
+    "glutes",
+    "calves",
+    "hip_flexors",
+    "adductors",
+    "abductors",
+    # Shoulders
+    "shoulders",
+    "front_delts",
+    "side_delts",
+    "rear_delts",
+    # Arms
+    "arms",
+    "biceps",
+    "triceps",
+    "forearms",
+    # Core
+    "core",
+    "abs",
+    "obliques",
+    # Full body
+    "full_body",
+)
+
 UNITS = ("lb", "kg")
 COMMON_EXERCISES = (
     "Bench Press",
@@ -28,9 +68,57 @@ def get_connection() -> sqlite3.Connection:
     return sqlite3.connect(DB_PATH)
 
 
+def _muscle_group_check_sql() -> str:
+    """Build CHECK(muscle_group IN (...)) from MUSCLE_GROUPS for schema/migration."""
+    quoted = ", ".join(repr(g) for g in MUSCLE_GROUPS)
+    return f"muscle_group IN ({quoted})"
+
+
 def init_db() -> None:
     with get_connection() as con:
         cur = con.cursor()
+        # Check if table exists with old schema (fewer muscle groups) and migrate
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='workout_entries'"
+        )
+        if cur.fetchone():
+            cur.execute("PRAGMA table_info(workout_entries)")
+            if cur.fetchall():  # table exists
+                cur.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='workout_entries'"
+                )
+                row = cur.fetchone()
+                if row and row[0] and "forearms" not in (row[0] or ""):
+                    # Old schema: recreate with new muscle group list
+                    cur.execute(
+                        """
+                        CREATE TABLE workout_entries_new (
+                            id INTEGER PRIMARY KEY,
+                            exercise_name TEXT NOT NULL,
+                            workout_date TEXT NOT NULL,
+                            sets INTEGER NOT NULL CHECK(sets > 0),
+                            top_weight REAL NOT NULL CHECK(top_weight >= 0),
+                            top_reps INTEGER NOT NULL CHECK(top_reps > 0),
+                            bodyweight REAL CHECK(bodyweight >= 0),
+                            unit TEXT NOT NULL CHECK(unit IN ('lb', 'kg')),
+                            muscle_group TEXT NOT NULL CHECK(%s),
+                            is_pr INTEGER NOT NULL DEFAULT 0 CHECK(is_pr IN (0, 1))
+                        )
+                        """
+                        % _muscle_group_check_sql()
+                    )
+                    cur.execute(
+                        """
+                        INSERT INTO workout_entries_new
+                        SELECT id, exercise_name, workout_date, sets, top_weight, top_reps,
+                               bodyweight, unit, muscle_group, is_pr
+                        FROM workout_entries
+                        """
+                    )
+                    cur.execute("DROP TABLE workout_entries")
+                    cur.execute("ALTER TABLE workout_entries_new RENAME TO workout_entries")
+                    con.commit()
+                    return
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS workout_entries (
@@ -42,12 +130,11 @@ def init_db() -> None:
                 top_reps INTEGER NOT NULL CHECK(top_reps > 0),
                 bodyweight REAL CHECK(bodyweight >= 0),
                 unit TEXT NOT NULL CHECK(unit IN ('lb', 'kg')),
-                muscle_group TEXT NOT NULL CHECK(
-                    muscle_group IN ('chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'full_body')
-                ),
+                muscle_group TEXT NOT NULL CHECK(%s),
                 is_pr INTEGER NOT NULL DEFAULT 0 CHECK(is_pr IN (0, 1))
             )
             """
+            % _muscle_group_check_sql()
         )
         con.commit()
 
