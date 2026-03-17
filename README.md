@@ -26,8 +26,22 @@ From this folder:
 python3 workout_tracker.py
 ```
 
+For the desktop GUI:
+
+```bash
+python3 workout_tracker_gui.py
+```
+
 No extra install is needed (uses Python's built-in `sqlite3` module).
 On first run, `workout_tracker.db` is created automatically.
+
+## GUI Exercise Suggestions
+
+- The GUI exercise field is still manual typing (you can enter any name).
+- As you type, it shows local autocomplete suggestions from:
+  - a built-in common exercise list
+  - exercises you previously logged in your database
+- No external AI/API key is used for suggestions.
 
 ## CRUD Operations
 

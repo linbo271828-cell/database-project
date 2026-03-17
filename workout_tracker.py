@@ -1,45 +1,18 @@
-import sqlite3
 from datetime import date
 
-
-DB_PATH = "workout_tracker.db"
-MUSCLE_GROUPS = ("chest", "back", "legs", "shoulders", "arms", "core", "full_body")
-PRESET_EXERCISES = (
-    "Bench Press",
-    "Squat",
-    "Deadlift",
-    "Overhead Press",
-    "Barbell Row",
-    "Pull-up",
+from workout_db import (
+    COMMON_EXERCISES,
+    MUSCLE_GROUPS,
+    UNITS,
+    create_entry,
+    delete_entry as db_delete_entry,
+    get_entry_by_id,
+    init_db,
+    list_entries,
+    update_entry as db_update_entry,
 )
 
-
-def get_connection() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
-
-
-def init_db() -> None:
-    with get_connection() as con:
-        cur = con.cursor()
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS workout_entries (
-                id INTEGER PRIMARY KEY,
-                exercise_name TEXT NOT NULL,
-                workout_date TEXT NOT NULL,
-                sets INTEGER NOT NULL CHECK(sets > 0),
-                top_weight REAL NOT NULL CHECK(top_weight >= 0),
-                top_reps INTEGER NOT NULL CHECK(top_reps > 0),
-                bodyweight REAL CHECK(bodyweight >= 0),
-                unit TEXT NOT NULL CHECK(unit IN ('lb', 'kg')),
-                muscle_group TEXT NOT NULL CHECK(
-                    muscle_group IN ('chest', 'back', 'legs', 'shoulders', 'arms', 'core', 'full_body')
-                ),
-                is_pr INTEGER NOT NULL DEFAULT 0 CHECK(is_pr IN (0, 1))
-            )
-            """
-        )
-        con.commit()
+PRESET_EXERCISES = COMMON_EXERCISES[:6]
 
 
 def read_non_empty(prompt_text: str) -> str:
@@ -83,7 +56,7 @@ def read_unit(prompt_text: str, allow_blank: bool = False):
         unit = input(prompt_text).strip().lower()
         if allow_blank and unit == "":
             return None
-        if unit in {"lb", "kg"}:
+        if unit in UNITS:
             return unit
         print("Unit must be 'lb' or 'kg'.")
 
@@ -145,18 +118,7 @@ def add_entry() -> None:
     muscle_group = read_muscle_group("Muscle group: ")
     is_pr = read_yes_no_pr("Was this a PR set? (y/n): ")
 
-    with get_connection() as con:
-        cur = con.cursor()
-        cur.execute(
-            """
-            INSERT INTO workout_entries (
-                exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr),
-        )
-        con.commit()
+    create_entry(exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr)
     print("Entry added.\n")
 
 
@@ -184,51 +146,18 @@ def view_entries() -> None:
     print("3. Sort by top weight (heaviest first)")
     choice = input("Choose an option: ").strip()
 
-    with get_connection() as con:
-        cur = con.cursor()
-        if choice == "2":
-            search = read_non_empty("Exercise name contains: ")
-            cur.execute(
-                """
-                SELECT id, exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr
-                FROM workout_entries
-                WHERE LOWER(exercise_name) LIKE LOWER(?)
-                ORDER BY workout_date DESC, id DESC
-                """,
-                (f"%{search}%",),
-            )
-        elif choice == "3":
-            cur.execute(
-                """
-                SELECT id, exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr
-                FROM workout_entries
-                ORDER BY top_weight DESC, top_reps DESC, id DESC
-                """
-            )
-        else:
-            cur.execute(
-                """
-                SELECT id, exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr
-                FROM workout_entries
-                ORDER BY workout_date DESC, id DESC
-                """
-            )
-        rows = cur.fetchall()
+    if choice == "2":
+        search = read_non_empty("Exercise name contains: ")
+        rows = list_entries(view_mode="filter", search=search)
+    elif choice == "3":
+        rows = list_entries(view_mode="top_weight")
+    else:
+        rows = list_entries(view_mode="all")
     print_rows(rows)
 
 
 def fetch_entry_by_id(entry_id: int):
-    with get_connection() as con:
-        cur = con.cursor()
-        cur.execute(
-            """
-            SELECT id, exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr
-            FROM workout_entries
-            WHERE id = ?
-            """,
-            (entry_id,),
-        )
-        return cur.fetchone()
+    return get_entry_by_id(entry_id)
 
 
 def update_entry() -> None:
@@ -274,18 +203,7 @@ def update_entry() -> None:
     is_pr_input = read_yes_no_pr(f"PR [{('y' if row[9] == 1 else 'n')}] (y/n): ", allow_blank=True)
     is_pr = row[9] if is_pr_input is None else is_pr_input
 
-    with get_connection() as con:
-        cur = con.cursor()
-        cur.execute(
-            """
-            UPDATE workout_entries
-            SET exercise_name = ?, workout_date = ?, sets = ?, top_weight = ?, top_reps = ?,
-                bodyweight = ?, unit = ?, muscle_group = ?, is_pr = ?
-            WHERE id = ?
-            """,
-            (exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr, entry_id),
-        )
-        con.commit()
+    db_update_entry(entry_id, exercise_name, workout_date, sets, top_weight, top_reps, bodyweight, unit, muscle_group, is_pr)
     print("Entry updated.\n")
 
 
@@ -307,10 +225,7 @@ def delete_entry() -> None:
         print("Delete cancelled.\n")
         return
 
-    with get_connection() as con:
-        cur = con.cursor()
-        cur.execute("DELETE FROM workout_entries WHERE id = ?", (entry_id,))
-        con.commit()
+    db_delete_entry(entry_id)
     print("Entry deleted.\n")
 
 
